@@ -1,8 +1,8 @@
-# Implementation tracking for UHPC014
+# Implementation tracking for UHPC015
 
-This document is **not normative**. It breaks [UHPC014](uhpc014.md) into a sequenced set of tasks
+This document is **not normative**. It breaks [UHPC015](uhpc015.md) into a sequenced set of tasks
 suitable for tracking as an epic, and may be revised (re-ordered, re-scoped, re-estimated) without
-requiring a change to the spec itself. Where this document and UHPC014 disagree, UHPC014 is
+requiring a change to the spec itself. Where this document and UHPC015 disagree, UHPC015 is
 authoritative.
 
 ## Layer dependency graph
@@ -128,4 +128,4 @@ Repos: `slurm-charms`, `filesystem-charms`, `sssd-operator`, `apptainer-operator
    `docs/reference/{composites,solutions,substrates}/`; write a runbook for dispatching
    `charmed_hpc` and interpreting results.
 5. Review with SolQA; register the `charmed-hpc-tests` repo URL and the new SKUs; capture residual
-   follow-ups (including the deferred capability-count promotion gating from UHPC014).
+   follow-ups (including the deferred capability-count promotion gating from UHPC015).

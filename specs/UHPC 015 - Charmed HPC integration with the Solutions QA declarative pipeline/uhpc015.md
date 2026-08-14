@@ -1,5 +1,5 @@
 ---
-index: UHPC014
+index: UHPC015
 title: Charmed HPC integration with the Solutions QA declarative pipeline
 ---
 
@@ -480,7 +480,7 @@ per backend.
 - Fixing the `sqa_tests` composite action's inline documentation example so the `args` field's
   described type matches its actual (array) implementation.
 - Milestone sequencing and task ownership for implementing this spec are tracked separately in
-  [uhpc014-implementation-tracking.md](uhpc014-implementation-tracking.md); that document is not
+  [uhpc015-implementation-tracking.md](uhpc015-implementation-tracking.md); that document is not
   normative and may be revised independently of this spec.
 
 ## Further information
