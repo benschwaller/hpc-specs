@@ -22,12 +22,6 @@ Test-harness work in Layer 4 (the pytest plugin, `charmed-hpc-tests` repo, and t
 start in parallel with Layer 2/3 once the Layer 1 tag name and Layer 2 product/SKU names are known,
 since it does not depend on the umbrella module being complete.
 
-## Milestones
-
-M0 preflight -> M1 per-charm modules tagged -> M2 umbrella module + unit -> M3 composite + solution ->
-M4 deployment stacks -> M5 policy data -> M6 manifest generation workflow -> M7 pytest plugin + test
-harness -> M8 end-to-end run + handoff.
-
 ## Task breakdown
 
 ### Task 1. Layer 1: per-charm Terraform modules (charm repos)
