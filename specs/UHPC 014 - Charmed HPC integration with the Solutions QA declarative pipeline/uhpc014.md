@@ -19,31 +19,29 @@ pytest marker plugin and a new `charmed-hpc-tests` repository) that let TDP sche
 Charmed HPC's integration tests automatically.
 
 MySQL and observability (COS) are both out of scope for the Charmed HPC repositories themselves:
-`charmed_hpc` consumes an existing, externally maintained Terraform module for each, the same way
-it consumes `mysql-plans`, and Charmed HPC only needs to confirm relation compatibility. The
-umbrella module also supports enabling more than one filesystem backend at once, so a single
-deployment can exercise several storage backends side by side instead of only one.
+`charmed_hpc` consumes an existing, externally maintained Terraform module for each. Charmed HPC
+only needs to confirm relation compatibility. The umbrella module also supports enabling more than
+one filesystem backend at once, so a single deployment can exercise several storage backends side
+by side instead of only one.
 
 ## Rationale
 
-Charmed HPC's integration and end-to-end tests currently provision throwaway infrastructure for
-every test run, then tear it down. Most of the wall-clock time in a run is spent waiting for
-machines to provision rather than exercising the charms, and this also multiplies infrastructure
-cost across every charm repository doing this independently.
-
-SolQA already operates TDP to solve this problem for other Canonical products (Canonical Kubernetes,
-COS, MicroCeph): TDP keeps test environments running as persistent test beds, and drives testing
+Charmed HPC needs to integrate into SolQA to continuously improve the product with end-to-end,
+product-level testing. Current Charmed HPC testing infrastructure covers individual charms, not the
+full stack. SolQA operates TDP to solve this problem for other Canonical products (Canonical Kubernetes,
+COS, MicroCeph): TDP reuses shared substrate pools (for example MAAS machines) and drives testing
 from a declarative manifest that states which component revisions should be tested together as a
-product. A scheduler reconciles the desired state (from policy data) against the observed state
+product. For each run it deploys the product under test, runs the suite, and tears the environment
+down again. A scheduler reconciles the desired state (from policy data) against the observed state
 (in Test Observer) and dispatches only the deployments and test runs still required.
 
-Bringing Charmed HPC into TDP lets the whole Slurm cluster stack be tested together as a single
-product against the Product Operational Scorecard. The stack covers `slurmctld`, `slurmd`,
+TDP integration enables the whole Slurm cluster stack to be tested together as a single product
+against the Product Operational Scorecard. The stack covers `slurmctld`, `slurmd`,
 `slurmdbd`, `slurmrestd`, `sackd`, `sssd`, `apptainer`, one or more filesystem backends deployed
 concurrently, MySQL, and COS-based observability, including Day-2 operations such as failover and
 scale-out, without every charm repository re-provisioning its own infrastructure.
 
-Doing this requires work in two places:
+This requires work in two places:
 
 - **Charmed HPC repositories** must expose a stable, machine-consumable contract: a Terraform
   module per charm (so TDP can deploy it), a single product-wide release manifest covering all
@@ -62,16 +60,16 @@ hierarchy, and concrete, dispatchable configuration in `deployments/`:
 
 ```mermaid
 flowchart TD
-    M["Module (Terraform)\ncatalogue/modules/&lt;name&gt;\nDeploys one or more charms"]
-    U["Unit (Terragrunt)\ncatalogue/units/&lt;name&gt;\nWraps a module, wires dependencies"]
-    C["Composite (Terragrunt stack)\ncatalogue/composites/&lt;name&gt;/&lt;variant&gt;\nGroups units: model + machines + product"]
-    S["Solution (Terragrunt stack)\ncatalogue/solutions/&lt;name&gt;/&lt;substrate&gt;\nAdds controller + COS to a composite"]
-    D["Deployment stack\ndeployments/{composites,solutions}/&lt;name&gt;/&lt;substrate&gt;\nConcrete values + versions.json"]
+    M["Module (Terraform)<br/>catalogue/modules/&lt;name&gt;<br/>Deploys one or more charms"]
+    U["Unit (Terragrunt)<br/>catalogue/units/&lt;name&gt;<br/>Wraps a module, wires dependencies"]
+    C["Composite (Terragrunt stack)<br/>catalogue/composites/&lt;name&gt;/&lt;variant&gt;<br/>Groups units: model + machines + product"]
+    S["Solution (Terragrunt stack)<br/>catalogue/solutions/&lt;name&gt;/&lt;substrate&gt;<br/>Adds controller + COS to a composite"]
+    D["Deployment stack<br/>deployments/composites,solutions/&lt;name&gt;/&lt;substrate&gt;<br/>Concrete values + versions.json"]
 
     M --> U --> C --> S --> D
 ```
 
-A release manifest (JSON, schema `v0`) declares the exact component revisions to test as a unit.
+A release manifest declares the exact component revisions to test as a unit.
 Submitting a manifest through the `Submit Release Manifest` workflow validates it, evaluates OPA
 policy (`policies/rules/*.rego` against `policies/data/**`) to build a test matrix, and registers
 pending solution executions in Test Observer. A scheduler external to this spec then dispatches
@@ -80,6 +78,22 @@ Observer.
 
 Charmed HPC integrates with every one of these layers. The remainder of this section defines the
 contract at each layer, in the order a reader would build it.
+
+- **Layer 1** is the raw building blocks: each charm exposes a small, self-contained Terraform
+  module that deploys exactly that charm and declares its relation endpoints in a standard output
+  shape. These modules live in the individual charm repositories.
+- **Layer 2** is the glue: an umbrella module imports all the Layer 1 modules, wires relations
+  between charms, and gates optional subsystems (storage, identity, observability) behind feature
+  flags. It is packaged into a composite (cluster only) and a solution (cluster + Juju controller +
+  COS), which are the units TDP actually deploys. This lives in TDP.
+- **Layer 3** is the release handoff: a workflow in the charm repositories generates a manifest
+  that pins the exact revision of every charm, validates it against TDP's schema, then submits it
+  to TDP. TDP evaluates policy against the manifest and registers the pending test runs in Test
+  Observer.
+- **Layer 4** is the test harness: OPA policy data that maps a manifest to a test matrix, a pytest
+  plugin and marker taxonomy that classify individual tests, the `charmed-hpc-tests` entrypoint
+  repository that TDP invokes, and the on-disk deployment stacks that make the product
+  dispatchable. This lives in TDP.
 
 ### Layer 1: Per-charm Terraform modules (charm repositories)
 
@@ -208,6 +222,7 @@ A release manifest declares which exact charm revisions should be tested togethe
 `ProductData` (a map of component name to `{ "revision": <int> }`, one entry per charm) with no
 fan-out required:
 
+
 ```json
 {
   "metadata": {
@@ -215,7 +230,7 @@ fan-out required:
     "product": "charmed-hpc",
     "family": "solution",
     "arch": "amd64",
-    "base": "ubuntu@24.04",
+    "base": "ubuntu@26.04",
     "track": "3.6/stable",
     "risk": "candidate",
     "terragruntRef": "tdp-v1"
@@ -242,10 +257,18 @@ fan-out required:
 }
 ```
 
-`metadata.track` here is the Juju agent track (for example `3.6/stable`), and must stay consistent
-with the `juju_tracks` declared in the Layer 4 policy data and with the Juju version pinned in
-`deployments/default_versions.hcl`; it is distinct from `metadata.base`, the Ubuntu base under
-test, and the two must not be conflated.
+> **Placeholder revisions.** The `0`s are placeholders and should be replaced each with the real Charmhub revision before submitting.
+
+The `metadata` block mixes two concerns:
+
+- **Juju-related fields** describe the Juju environment the stack runs on, not Charmed HPC itself:
+  `track` is the Juju agent track (for example `3.6/stable`) and must stay consistent with the
+  `juju_tracks` declared in the Layer 4 policy data and with the Juju version pinned in
+  `deployments/default_versions.hcl`; `base` is the Ubuntu base under test (for example
+  `ubuntu@26.04`). These two must not be conflated.
+- **Charmed HPC product fields** describe the product being released and tested: `product`
+  (`charmed-hpc`), `family` (`solution`), `arch`, `risk` (the TDP test-gating stage, e.g.
+  `candidate`), and `terragruntRef` (the TDP ref the deployment stack is pinned to).
 
 A `workflow_dispatch` workflow, living in `slurm-charms` or a small Charmed HPC meta-repository,
 generates this manifest: given a `track`/`risk` input, it fetches each charm's current revision
@@ -264,8 +287,7 @@ policy data below exists and evaluates with zero violations.
 
 ### Layer 4: Scheduling policy and test harness
 
-**Policy data.** TDP's existing `product.rego` reads two YAML data files per product; no new Rego
-is required. `policies/data/products/charmed-hpc.yaml` declares the Juju tracks Charmed HPC
+**Policy data.** TDP's existing `product.rego` reads two YAML data files per product. The to-be-created `policies/data/products/charmed-hpc.yaml` declares the Juju tracks Charmed HPC
 supports, the test suites it exposes, and which SKUs are gated at which risk level:
 
 ```yaml
@@ -341,7 +363,7 @@ integration test with exactly one of `@pytest.mark.validation` or `@pytest.mark.
 their own `pytest_configure`/`pytest_collection_modifyitems` implementations in favour of the
 plugin's. Fixtures and custom step definitions in each repository's `conftest.py` are unaffected.
 
-**Test entrypoint.** A new repository, `charmed-hpc-tests`, is the SolQA-facing orchestration point.
+**Test entrypoint.** A new repository, `charmed-hpc-tests`, is the SolQA-facing test entrypoint.
 It is the `repo:` value in `policies/data/products/charmed-hpc.yaml` above, and it composes which
 charm-repository suites make up the solution-level `hpc_uats` and `validation` runs. It exposes an
 executable `./sqa_tests` that maps a suite name to a pytest marker selector and always writes JUnit
@@ -424,11 +446,6 @@ per backend.
 
 ## Risks
 
-- **Base availability gaps.** Not every charm may have published a release for a given Ubuntu base
-  at the time deployment stacks are built; per-charm base selection happens at the deployment-stack
-  layer (`versions.json`), so a missing base for one charm should not block onboarding the rest of
-  the stack, but it does mean the first `charmed_hpc` deployment may run a mixed set of bases across
-  charms until every charm catches up.
 - **Wide blast radius in the umbrella module.** Because `slurmctld`'s relations are centralized in
   one module (see [Evaluated alternatives](#evaluated-alternatives)), a change to any one charm's
   `provides`/`requires` output shape can require a corresponding change to the umbrella module's
