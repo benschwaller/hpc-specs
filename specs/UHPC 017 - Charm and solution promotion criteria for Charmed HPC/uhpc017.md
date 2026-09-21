@@ -72,7 +72,7 @@ is the standard "build once, promote the artifact" principle.
 | Channel     | Audience                         | Intent                                                      | Stability contract |
 |-------------|----------------------------------|------------------------------------------------------------|--------------------|
 | `edge`      | Charm developers, CI             | Every merge to the tracked branch; may break at any time    | None |
-| `beta`      | Early adopters, integration labs | Feature-complete for the increment; known-good on target base | Deploys and passes full functional tests |
+| `beta`      | Early adopters, integration labs | Feature-complete for the increment of version; functional testing against target base achieved | Deploys and passes full functional tests |
 | `candidate` | Release validators, operators evaluating an upgrade | Release candidate after some soak; no known critical defects    | Production-shaped; upgrade and rollback verified |
 | `stable`    | Production users                 | Supported, documented, scale-tested, backwards-compatible release         | Full support contract; safe sequential upgrades |
 
@@ -113,14 +113,14 @@ not yet implement a gate, it is marked *(target)*. Today, `slurm-charms` CI:
 
 Each dimension is a class of evidence that a promotion gate can require.
 
-| Dimension            | Question it answers                                              | Tooling in this repo |
+| Dimension            | Question it answers                                              | Tooling |
 |----------------------|-----------------------------------------------------------------|----------------------|
 | **Unit**             | Does the charm logic behave correctly in isolation              | `pytest` + `ops.testing` (Scenario/Context) via `just unit` |
 | **Integration**      | Does the charm deploy, relate, and run against a live Juju/LXD  | `jubilant` via `just integration` |
 | **Functional / BDD** | Does the charm satisfy user-facing behaviors end to end         | `jubilant` today; `pytest-jubilant-bdd` Gherkin scenarios *(target)* |
 | **Upgrade / refresh**| Can users move between revisions without data/config loss       | `juju refresh` across revisions in a `jubilant` test *(target for full matrix)* |
 | **Multi-charm**      | Does it cooperate with the charms it integrates with            | See Part B |
-| **Non-functional**   | Scale, soak, performance, security, HA/resilience               | `--run-high-availability`; `charmed-hpc-benchmarks`; CVE/dependency scans |
+| **Operational**   | Scale, soak, performance, security, HA/resilience               | `--run-high-availability`; `charmed-hpc-benchmarks`; CVE/dependency scans |
 
 #### A.3.1 Definitions
 
@@ -272,12 +272,15 @@ External integrations (not part of the solution's own bundle):
 |-----------|-----------------------------------|--------------------------|
 | MySQL     | `canonical/mysql-operator`       | Accounting database backing `slurmdbd`; required |
 | COS       | `canonical/cos-lite`             | Metrics, alerting, dashboards, and logs via `cos-agent`; required |
-| Authentik | `canonical/authentik-server-operator` | Upstream OIDC/LDAP identity provider backing SSSD and/or OpenSSH; optional |
+| Authentik | `canonical/authentik-server-operator` | Upstream OIDC/LDAP identity provider backing SSSD; optional |
+| SMTP      | `canonical/smtp-integrator-operator`  | Job status email notifications via an external mail server integrated with `slurmctld`; optional |
 
 COS and Authentik both run cross-model on **Kubernetes** rather than alongside the
 machine-based solution, so both are validated starting at the `candidate` gate
 (B.3.3) rather than `edge`/`beta`. Authentik is additionally optional
 (`authentik-server` + `authentik-worker`, plus `authentik-ldap-outpost` for LDAP).
+When in scope, the SMTP integration additionally requires `slurmdbd` to be deployed and
+integrated first; otherwise `slurmctld` never leaves `Waiting` status.
 
 Supporting (not deployed as part of the solution, but relied on to build or validate it):
 
@@ -290,31 +293,51 @@ Supporting (not deployed as part of the solution, but relied on to build or vali
 
 #### B.1.2 Relation / integration map
 
-```
-        sackd ──sackd──┐
-     slurmrestd ─slurmrestd─┐
-                            ▼
-   slurmd ──slurmd──►  slurmctld  ◄──slurmdbd── slurmdbd ──database──► mysql
-                            │
-                            ├── cos-agent ──► COS (observability)
-                            └── oci-runtime ─► apptainer
+This map mirrors the integrations performed in the Charmed HPC
+[getting-started tutorial](https://documentation.ubuntu.com/charmed-hpc/latest/getting-started/),
+together with the accounting, identity, observability, and mail integrations from the
+Charmed HPC how-to guides:
 
-   filesystem (server) ──mount_info──► filesystem-client ──mount──► compute/login nodes
-   sssd ──► identity/auth on login + compute nodes
-   openssh ──► SSH access on login nodes
+```mermaid
+graph TD
+    sackd["sackd (login node)"] --> slurmctld
+    slurmd["slurmd (compute nodes)"] --> slurmctld
+    slurmrestd --> slurmctld
+    slurmdbd --> slurmctld
+    slurmdbd -- database --> mysql
 
-   authentik-server ──oidc/ldap──► sssd and openssh (external integration, cross-model)
+    filesystem-server["filesystem server (CephFS, Lustre, or NFS)"] --> filesystem-client
+    filesystem-client -- mount --> slurmd
+    filesystem-client -- mount --> sackd
+
+    slurmctld -- oci-runtime --> apptainer
+    sackd -- juju-info --> apptainer
+    slurmd -- juju-info --> apptainer
+
+    slurmctld -- cos-agent --> cos["COS (observability)"]
+    slurmctld -- smtp --> smtp["smtp-integrator (external mail server)"]
+
+    slurmctld -- juju-info --> sssd
+    slurmd -- juju-info --> sssd
+    sackd -- juju-info --> sssd
+    sssd -- ssh-config --> openssh
+    sackd -- juju-info --> openssh
+    authentik["authentik-server (external, cross-model)"] -- ldap --> sssd
 ```
 
 Key cross-charm surfaces to validate:
 
 - `slurmctld` <-> `slurmd`/`slurmdbd`/`sackd`/`slurmrestd` (core Slurm relations).
 - `slurmdbd` <-> `mysql` (accounting database).
-- filesystem mount flowing through to compute/login nodes.
-- SSSD-provided identity usable by Slurm job submission.
-- OpenSSH-provided SSH access on login nodes, integrated with SSSD-backed identity.
-- Authentik as an external IdP integration for SSSD/OpenSSH, where required.
-- Apptainer as the OCI runtime for containerized jobs.
+- Shared filesystem: `filesystem-client` consuming a filesystem server (CephFS, Lustre,
+  or NFS), mounted on both compute (`slurmd`) and login (`sackd`) nodes.
+- Apptainer installed on `sackd` and `slurmd` (`juju-info`), providing the OCI runtime
+  (`oci-runtime`) to `slurmctld` for containerized jobs.
+- SSSD installed on `slurmctld`, `slurmd`, and `sackd` (`juju-info`), providing
+  directory-backed identity for job submission.
+- OpenSSH providing SSH access on the login node (`sackd`), configured by SSSD
+  (`ssh-config`).
+- Authentik as an external LDAP identity provider feeding SSSD (`ldap`), where required.
 - `slurmctld` -> COS for integrated observability.
 
 ### B.2 Solution channel model
@@ -478,7 +501,7 @@ single-charm gates are inherited per the weakest-link rule.
 
 As in Part A, promotion to solution `beta` and above is a deliberate action by the
 solution/release owner, never an automatic side effect. `candidate` and `stable` also
-require the maintainers of every required component (see B.6).
+require the maintainers of every required component (see B.1.1).
 
 ### B.5 Non-functional expectations (solution level)
 
