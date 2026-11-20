@@ -59,7 +59,7 @@ Charmed HPC solution.
 
 #### A.1.1 What a "promotion" is
 
-A promotion moves a **specific charm revision** from one risk channel to the next
+A promotion moves a specific charm revision from one risk channel to the next
 *within the same track* (for example, `latest/edge` -> `latest/beta`, or
 `24.11/beta` -> `24.11/candidate`). Promotion never rebuilds the artifact: the same
 revision that passed the lower channel is what gets released to the higher one. This
@@ -72,9 +72,9 @@ is the standard "build once, promote the artifact" principle.
 | Channel     | Audience                         | Intent                                                      | Stability contract |
 |-------------|----------------------------------|------------------------------------------------------------|--------------------|
 | `edge`      | Charm developers, CI             | Every merge to the tracked branch; may break at any time    | None |
-| `beta`      | Early adopters, integration labs | Feature-complete for this version increment; functional testing against the target base achieved | Deploys and passes full functional tests |
-| `candidate` | Release validators, operators evaluating an upgrade | Release candidate after extended reliability testing; no known critical defects    | Production-shaped; upgrade and rollback verified |
-| `stable`    | Production users                 | Supported, documented, scale-tested, backwards-compatible release         | Full support contract; safe sequential upgrades |
+| `beta`      | Early adopters, integration labs | Feature-complete for this version increment; functional testing against the target base achieved | Deploys and passes full functional and acceptance tests |
+| `candidate` | Release validators, operators evaluating an upgrade | Release candidate after extended reliability testing; no known critical or high defects    | Production-shaped; upgrade and rollback verified |
+| `stable`    | Production users                 | Supported, documented, scale-tested, backwards-compatible release         | Full support contract; guaranteed upgrade path from the previous `stable` |
 
 #### A.2.2 Tracks
 
@@ -83,12 +83,12 @@ upstream project that follows its own major/minor versioning (such as the Slurm
 charms), tracks follow that upstream line, e.g. a `YY.MM` track (`track/25.11` in
 git) plus `latest` for the current development line. Not every charm has an
 upstream to track this way; for those, `latest` may be the only track, or tracks
-may instead mark some other compatibility boundary (for example, a supported
-Ubuntu base or a breaking change to a relation interface).
+may instead mark some other compatibility boundary (for example, a breaking
+change to a relation interface).
 
 Guidance:
 
-- **One track per independently-promoted compatibility line** (e.g. per supported
+- One track per independently-promoted compatibility line (e.g. per supported
   Slurm major line, where applicable).
 - A single track/channel can support multiple Ubuntu bases and architectures at
   once (per the `platforms` entries in `charmcraft.yaml`); the base/architecture is
@@ -100,44 +100,46 @@ Guidance:
 
 Each dimension is a class of evidence that a promotion gate can require. Test
 plans for these dimensions use the test plan types defined in OO001:
-**functional**, **solution**, **performance**, **reliability**, and **security**.
-Functional tests should be written in BDD style for clarity and maintainability.
+functional, solution, performance, reliability, and security.
+Acceptance tests should be written in BDD style for clarity and maintainability.
 
 | Dimension            | OO001 type  | Question it answers                             | Tooling |
 |----------------------|-------------|-------------------------------------------------|---------|
 | **Unit**             | N/A | Does the charm logic behave correctly in isolation | `pytest` + `ops.testing` (Scenario/Context) via `just unit` |
 | **Integration**      | functional  | Does the charm deploy, relate, and run against a live Juju/LXD | `jubilant` via `just integration` |
-| **Functional**       | functional  | Does the charm satisfy user-facing behaviors end to end | `jubilant` today; full scenario coverage *(target)* |
+| **Acceptance**       | functional  | Does the charm satisfy user-facing behaviors end to end | `jubilant` today; full scenario coverage *(target)* |
 | **Upgrade / refresh**| functional  | Can users move between revisions without data/config loss | `juju refresh` across revisions in a `jubilant` test *(target for full matrix)* |
 | **Multi-charm**      | solution    | Does it cooperate with the charms it integrates with | See Part B |
-| **Performance**      | performance | Does it meet scale and performance baselines    | `charmed-hpc-benchmarks` |
+| **Performance**      | performance | Does it meet scale and performance baselines    | Charm-level timings from the integration suite *(target)*; `charmed-hpc-benchmarks` covers solution-level performance and scale (Part B) |
 | **Reliability**      | reliability | Does it stay healthy under failure and sustained load (HA) | `--run-high-availability`; scheduled sustained-load runs |
 | **Security**         | security    | Is the artifact free of unresolved critical/high vulnerabilities | CVE/dependency scans |
 
 #### A.3.1 Definitions
 
 - **Unit tests** exercise charm handlers, config, actions, and libraries with a mocked
-  Juju model. Every charm **action** must have unit coverage. 
+  Juju model. Every charm action must have test coverage: unit coverage where the
+  action's logic can be exercised with a mocked model, integration coverage where the
+  action requires a live deployment to be meaningfully tested.
 - **Integration tests** deploy the packed charm to a real controller, form its
   relations, and assert active/idle status plus basic workload function. The minimal
   deploy-and-verify subset of these tests is used as a fast *functional* gate before
   deeper testing.
-- **Functional tests** express behaviors as `Given/When/Then` scenarios that a
+- **Acceptance tests** express behaviors as `Given/When/Then` scenarios that a
   non-developer stakeholder can read (e.g. "Given a running cluster, When a user submits
   a batch job, Then it completes and returns output").
 - **Upgrade / refresh tests** deploy revision N-1 (or previous stable), `juju refresh`
   to the candidate revision, and assert data/config preservation and healthy status.
   Rollback tests refresh back down and assert recovery.
 - **Multi-charm (solution) tests** verify the charm against the other charms and
-  products it integrates with. 
+  products it integrates with.
 - **Performance tests** cover horizontal/vertical scale and a performance baseline
-  with an agreed regression budget. 
+  with an agreed regression budget.
 - **Reliability tests** cover HA failover and resilience in non-ideal scenarios, and
   sustained, representative load over an extended period (multi-hour to multi-day) to
   detect memory leaks, resource exhaustion, restarts, and status flaps.
 - **Security tests** cover CVE/dependency scanning of the artifact and its
   dependencies, and checks that non-admin users cannot perform privileged
-  operations. 
+  operations.
 
 ### A.4 Per-channel promotion gates
 
@@ -150,8 +152,8 @@ Trigger: merge to the tracked branch (`main` or `track/*`). Fully automated.
 
 - [CI] Static checks pass: `just check` (format, lint, typecheck).
 - [CI] Unit tests pass: `just unit`.
-- [CI] Unit coverage >= **85%** line coverage (proposed default; enforced via the
-  coverage report / TICS) *(target: fail the build below threshold)*.
+- [CI] Unit coverage >= 85% line coverage (proposed default; currently reported
+  via the coverage report / TICS) *(target: fail the build below threshold)*.
 - [CI] Charm packs successfully for every supported base (`just repo stage <charm>`
   + `charmcraft pack`).
 - [CI] Minimal functional integration: deploy + reach `active/idle` on at least one
@@ -166,25 +168,37 @@ Intent: feature-complete for this increment and known-good on the target base.
 
 Requires everything in `edge`, plus:
 
-- [CI] **Full** integration suite green on every supported base: `just integration`.
-- [CI] Every charm **action** is exercised by an integration or unit test.
+- [CI] Full integration suite green on every supported base: `just integration`.
+- [CI] Every charm action is exercised by an integration or unit test.
 - [CI] Every `provides`/`requires` relation is exercised by an integration test
-  (relation data flows and both sides settle).
-- [CI] **Reliability / HA (single-charm)** suite passes:
-  `just integration -- --run-high-availability` (leader loss and `slurmctld` failover
-  recover the charm to healthy on its own). Job survival across failover with the rest
-  of the stack live is a solution gate, see B.3.2.
-- [CI] **Security check (single-charm)**: CVE/dependency scan of the
-  artifact and its Python/OS dependencies with **no unresolved critical/high**
-  findings.
-- [CI] **Functional** acceptance scenarios pass, covering the charm's primary user
+  (relation data flows and both sides settle). Where the partner is an external
+  or optional component (COS, SMTP, Apptainer, an identity provider), a local
+  stand-in for the external service is sufficient. Existing practice: the
+  `slurm-charms` mail tests use an `aiosmtpd` capture server for the external
+  mail server, and `sssd-operator` uses OpenLDAP with an Authentik-style schema
+  for Authentik. Validation against the real partner is a solution gate (Part B).
+- [CI] Reliability / HA (single-charm) suite passes:
+  `just integration -- --run-high-availability`. For HA-capable charms, leader loss
+  and failover recover the charm to healthy on its own (e.g. `slurmctld` failover);
+  charms without an HA story must instead document why the suite is not applicable.
+  Job survival across failover with the rest of the stack live is a solution gate,
+  see B.3.2.
+- [CI] Security check (single-charm): CVE/dependency scan of the
+  artifact and its Python/OS dependencies with no unresolved critical/high
+  findings, and checks pass that non-admin users cannot perform privileged
+  operations *(target: some charms have these checks today; extend to all)*.
+- [CI] Acceptance scenarios pass, covering the charm's primary user
   journeys *(target)*.
+- [CI] Basic upgrade check *(target)*: `juju refresh` from the previous released
+  revision (or previous `stable`, if none) to the candidate revision preserves
+  data/config and returns to healthy status. The full upgrade/rollback matrix is a
+  `candidate` gate (A.4.3).
 - [CI/MAN] Coverage has not regressed versus the current `beta` revision (or the
   previous revision, if none is on `beta` yet).
 - [MAN] Draft documentation exists for any new config/action/relation (a paired PR in
   `charmed-hpc-docs`, per the contributing guide).
-- [CI] The **Nightly run** tests pass.
-- [MAN] No open **critical or high** severity bugs against the revision.
+- [CI] The HA suite above also passes on its scheduled (nightly) run against `edge`.
+- [MAN] No open critical or high severity bugs against the revision.
 
 #### A.4.3 Promote to `candidate`
 
@@ -192,17 +206,21 @@ Intent: a release candidate under extended reliability testing; production-shape
 
 Requires everything in `beta`, plus:
 
-- [CI] **Upgrade matrix** passes *(target)*:
-  - refresh from **previous stable** -> candidate,
-  - refresh from **previous beta/candidate** -> candidate,
-  - **rollback** candidate -> previous revision recovers cleanly.
-- [CI] Operational baseline captured *(target)*:
-  - scale up **and** down of applicable applications (units and resources).
-  - sustained-load reliability run >= **12h** (single charm) with no
-    leaks/restarts/status flaps *(target, depends on Solutions QA)*,
-  - performance baseline recorded (regression budget agreed by maintainers).
-- [MAN] Documentation drafted: usage, configuration, actions, relations, limitations,
-  and any deviation from the non-charmed workload.
+- [CI] Upgrade matrix passes *(target)*:
+  - refresh from previous stable -> candidate,
+  - refresh from previous beta/candidate -> candidate,
+  - rollback candidate -> previous revision recovers cleanly.
+- [CI/MAN] Operational baseline captured *(target)*:
+  - scale up and down of applicable applications (units and resources).
+  - sustained-load reliability run >= 12h (single charm; proposed default) with no
+    leaks/restarts/status flaps *(target, depends on Solutions QA; may be waived for
+    a given promotion only by the solution/release owner, with the waiver recorded)*,
+  - charm-level performance baseline recorded (e.g. deploy, reconcile, and
+    relation-settle timings from the integration suite; regression budget agreed
+    by maintainers). Solution-level performance and scale baselines are a Part B
+    gate via `charmed-hpc-benchmarks` (B.3.3).
+- [MAN] Documentation complete (not yet published): usage, configuration, actions,
+  relations, limitations, and any deviation from the non-charmed workload.
 - [MAN] Release notes / CHANGELOG entry drafted for the revision.
 - [MAN] Backwards-compatibility / interface-stability review: no breaking change to a
   published relation interface without a version/track bump.
@@ -214,30 +232,32 @@ Intent: supported, documented, backwards-compatible general availability.
 
 Requires everything in `candidate`, plus:
 
-- [MAN] **Sustained-load reliability run on `candidate`:** >= **7 days** with **zero
-  regressions** and no new critical/high defects (proposed default).
+- [MAN] Sustained-load reliability run on `candidate`: >= 7 days with zero
+  regressions and no new critical/high defects (proposed default).
 - [CI/MAN] Artifact is reproducible from a tagged, signed commit; the exact revision
   promoted is the one that passed the sustained-load reliability run on `candidate`.
-- [CI] Upgrade from the **current `stable`** revision to the new revision verified
-  (data + config preserved) *(target)*.
 - [MAN] Security sign-off (no unresolved critical/high; SECURITY.md contact current).
-- [MAN] Documentation published (not just drafted) and release notes finalized.
+- [MAN] Documentation published and release notes finalized.
 - [MAN] Rollback plan documented (which revision to refresh back to, and how).
 
 ### A.5 Automation vs. manual sign-off
 
 Recommended posture: automate what is deterministic and cheap; reserve humans
-for judgement, long reliability runs, and scale.
+for judgement, long reliability runs, and scale. Scale and sustained-load runs
+consume real infrastructure budget, so they are triggered deliberately (scheduled
+or manual dispatch), never on every merge, and a human reviews the evidence
+before sign-off.
 
 | Gate class                         | edge | beta | candidate | stable |
 |------------------------------------|:----:|:----:|:---------:|:------:|
 | Static checks / unit / functional (minimal) | CI   | CI   | CI        | CI     |
 | Full integration + relations             | -    | CI   | CI        | CI     |
-| Functional + reliability (HA)            | -    | CI   | CI        | CI     |
-| Upgrade / rollback matrix                | -    | CI*  | CI        | CI     |
+| Acceptance + reliability (HA)            | -    | CI   | CI        | CI     |
+| Upgrade / rollback matrix                | -    | CI*  | CI        | -      |
 | Performance (scale, baseline) / reliability (sustained load) | - | - | CI+MAN | MAN |
 | Security / CVE scan                     | -    | CI   | CI        | CI+MAN |
-| Docs / release notes               | -    | MAN  | MAN       | MAN    |
+| Docs                               | -    | MAN  | MAN       | MAN    |
+| Release notes                      | -    | -    | MAN       | MAN    |
 | Backwards-compat / interface review| -    | -    | MAN       | MAN    |
 | Final promotion approval           | auto | MAN  | MAN       | MAN    |
 
@@ -248,12 +268,12 @@ promotion, or an approved workflow_dispatch), never an automatic side effect of 
 
 ## Specification Part B: Charmed HPC solution promotion criteria (multi-charm)
 
-This part defines what must be true to promote the **Charmed HPC solution** (a set
+This part defines what must be true to promote the Charmed HPC solution (a set
 of cooperating charms) along the risk ladder `edge -> beta -> candidate -> stable`.
 
-It **builds on** Part A, which governs each individual charm. A solution promotion
+It builds on Part A, which governs each individual charm. A solution promotion
 assumes each constituent charm has independently satisfied the single-charm gates for
-the same target channel; this part adds the **cross-charm** gates that only make sense
+the same target channel; this part adds the cross-charm gates that only make sense
 when the charms are deployed together.
 
 ### B.1 Solution scope
@@ -273,11 +293,11 @@ External integrations (not part of the solution's own bundle):
 | Component | Repository                       | Role in the integration |
 |-----------|-----------------------------------|--------------------------|
 | MySQL     | `canonical/mysql-operator`       | Accounting database backing `slurmdbd`; required |
-| COS       | `canonical/cos-lite`             | Metrics, alerting, dashboards, and logs via `cos-agent`; required |
+| COS       | `canonical/cos-lite`             | Metrics, alerting, dashboards, and logs via `cos-agent`; required from `candidate` |
 | Authentik | `canonical/authentik-server-operator` | Upstream OIDC/LDAP identity provider backing SSSD; optional |
 | SMTP      | `canonical/smtp-integrator-operator`  | Job status email notifications via an external mail server integrated with `slurmctld`; optional |
 
-COS and Authentik both run cross-model on **Kubernetes** rather than alongside the
+COS and Authentik both run cross-model on Kubernetes rather than alongside the
 machine-based solution, so they are validated starting at the `candidate` gate
 (B.3.3) rather than `edge`/`beta`. Authentik is optional
 (`authentik-server` + `authentik-worker`, plus `authentik-ldap-outpost` for LDAP).
@@ -290,7 +310,7 @@ Supporting (not deployed as part of the solution, but relied on to build or vali
 |-------------------------|-------------------------------------|-----|
 | Charm libraries         | `canonical/charmed-hpc-libs`        | Shared building blocks (interfaces, conditions framework) that constituent charms are built against |
 | Benchmarks / validation | `canonical/charmed-hpc-benchmarks`  | Operational and end-to-end cluster validation |
-| Step library            | `canonical/pytest-jubilant-bdd`     | Reusable step handlers for functional gates |
+| Step library            | `canonical/pytest-jubilant-bdd`     | Reusable step handlers for acceptance gates |
 | Documentation           | `canonical/charmed-hpc-docs`        | Solution documentation and release notes |
 
 #### B.1.2 Relation / integration map
@@ -327,7 +347,7 @@ graph TD
     authentik["authentik-server (external, cross-model)"] -- ldap --> sssd
 ```
 
-Key cross-charm surfaces to validate:
+Cross-charm surfaces to validate:
 
 - `slurmctld` <-> `slurmd`/`slurmdbd`/`sackd`/`slurmrestd` (core Slurm relations).
 - `slurmdbd` <-> `mysql` (accounting database).
@@ -341,6 +361,7 @@ Key cross-charm surfaces to validate:
   (`ssh-config`).
 - Authentik as an external LDAP identity provider feeding SSSD (`ldap`), where required.
 - `slurmctld` -> COS for integrated observability.
+- `slurmctld` -> `smtp-integrator` for job-status email notifications (see UHPC006).
 
 ### B.2 Solution channel model
 
@@ -348,8 +369,8 @@ Key cross-charm surfaces to validate:
 
 **A solution channel is only as mature as its least-mature required constituent.**
 
-The Charmed HPC solution is considered to be at risk channel `X` only when **every
-required charm** is available at channel `X` (or better) on a compatible track, and the
+The Charmed HPC solution is considered to be at risk channel `X` only when every
+required charm is available at channel `X` (or better) on a compatible track, and the
 cross-charm gates for `X` in this document pass. For example, the solution cannot be
 `candidate` if any required charm is still only at `beta`.
 
@@ -357,14 +378,14 @@ cross-charm gates for `X` in this document pass. For example, the solution canno
 
 - Define a **solution version matrix** per solution track: the exact track/channel of
   each constituent charm that composes that solution release.
-- All constituents in a given solution release must target a **compatible Ubuntu base**
-  and be validated against the **same Juju version(s)**.
-- Optional/experimental constituents (e.g. Apptainer, if a deployment does not use
-  containers) may lag, but must be explicitly marked optional in the matrix and
-  excluded from the required set for that channel.
-- External integrations (MySQL, COS, Authentik) are recorded separately and aren't
+- All constituents in a given solution release must target a compatible Ubuntu base
+  and be validated against the same Juju version(s).
+
+- External integrations (MySQL, COS, Authentik, SMTP) are recorded separately and aren't
   subject to the weakest-link rule; each entry lists the validated version and
-  confirms the integration is established.
+  confirms the integration is established. An external integration marked required
+  is required from the channel at which it is first validated (e.g. COS from
+  `candidate`); before that channel its absence does not block promotion.
 
 A minimal matrix template:
 
@@ -372,18 +393,30 @@ A minimal matrix template:
 Solution release: __________   Solution channel: __________   Ubuntu base: __________
 Juju version(s) validated: __________
 
-Component          Track        Channel      Revision
-slurm-charms       __________   __________   __________
-filesystem-charms  __________   __________   __________
-sssd-operator      __________   __________   __________
-openssh-operator   __________   __________   __________
-apptainer-operator __________   __________   __________   (optional: yes/no)
+Component            Track        Channel      Revision
+slurmctld            __________   __________   __________
+slurmd               __________   __________   __________
+slurmdbd             __________   __________   __________
+sackd                __________   __________   __________
+slurmrestd           __________   __________   __________
+filesystem-client    __________   __________   __________
+filesystem server    __________   __________   __________   (one of: cephfs-server-proxy,
+                                                              lustre-server + lustre-server-proxy,
+                                                              nfs-server-proxy)
+sssd                 __________   __________   __________
+openssh              __________   __________   __________
+apptainer            __________   __________   __________
 
 External integrations:
 mysql              __________   __________   __________
 cos                __________   __________   __________
 authentik-server   __________   __________   __________   (Kubernetes; cross-model; optional: yes/no)
+smtp-integrator    __________   __________   __________   (optional: yes/no)
 ```
+
+The `slurm-charms` monorepo publishes all five charms to `<track>/edge` on every
+merge, but each charm receives its own Charmhub revision and is promoted
+independently above `edge`; record each charm's revision individually.
 
 ### B.3 Cross-charm gates per channel
 
@@ -394,7 +427,8 @@ Legend: **[CI]** automated; **[MAN]** manual; **[CI/MAN]** CI evidence, human re
 
 - [CI] Every required charm is available at `edge` on a compatible track.
 - [CI] Full-stack bundle deploys and reaches `active/idle`: `slurmctld` + `slurmd` +
-  `slurmdbd` (+`mysql`) + `sackd` + filesystem + SSSD + OpenSSH on the target base.
+  `slurmdbd` (+`mysql`) + `sackd` + `slurmrestd` + filesystem + SSSD + OpenSSH on
+  the target base.
 - [CI] Core Slurm relations settle (all four `slurmctld` relations, `slurmdbd:database`).
 
 #### B.3.2 Solution `beta`
@@ -402,32 +436,32 @@ Legend: **[CI]** automated; **[MAN]** manual; **[CI/MAN]** CI evidence, human re
 Requires solution `edge`, plus:
 
 - [CI] All required charms at `beta` (weakest-link rule).
-- [CI] **End-to-end functional job** (a minimal check for the assembled solution):
-  submit a batch job through the login path
-  (`sackd`/`slurmrestd` -> `slurmctld` -> `slurmd`) and confirm it completes.
+- [CI] End-to-end functional job (a minimal check for the assembled solution):
+  submit a batch job through the login node (`sackd`) or the REST API (`slurmrestd`)
+  -> `slurmctld` -> `slurmd` and confirm it completes.
 - [CI] Shared filesystem is mounted on compute + login nodes and is writable from a job.
 - [CI] SSSD-provided identity can submit and own a job.
 - [CI] A user can SSH into a login node via OpenSSH, authenticated against
   SSSD-provided identity.
-- [CI] **Reliability / HA (cross-charm)**: with the full stack live, a running job
-  survives an `slurmctld` leader failover and completes, keeping access to the shared
+- [CI] Reliability / HA (cross-charm): with the full stack live, a running job
+  survives a `slurmctld` leader failover and completes, keeping access to the shared
   filesystem and SSSD-provided identity throughout. (Per-charm `slurmctld` failover
   recovery is covered by the single-charm HA gate in A.4.2; this gate adds the
   cross-charm dimension of a job in flight across the wider stack.)
-- [CI] **Functional** acceptance of primary cluster journeys *(target)*, e.g.:
+- [CI] Acceptance scenarios for primary cluster journeys pass *(target)*, e.g.:
   - submit and complete an `sbatch` job that reads/writes the shared filesystem,
   - run a containerized job via Apptainer,
   - authenticate a user through SSSD and run a job as that user,
   - SSH into a login node via OpenSSH and submit a job from an interactive shell,
   - query cluster state through `slurmrestd`.
-- [CI] **Composed-set security check**: no **critical/high** issues that appear only
+- [CI] Composed-set security check: no critical/high issues that appear only
   when the charms are deployed together, e.g. dependency version conflicts across the
   assembled bundle, credentials or secrets exposed over cross-charm relations, or
   network surfaces opened by the composed topology. (Per-charm CVE/dependency scans
   are inherited via the weakest-link rule; this gate covers only what a single charm's
   scan cannot see.)
 - [MAN] Deployment documentation drafted for any changed topology or relation.
-- [CI] **Nightly run** passes, including a full-stack run and the scheduled HA job
+- [CI] The scheduled full-stack run passes, including the cross-charm HA job above
   *(no fixed bake time)*.
 
 #### B.3.3 Solution `candidate`
@@ -437,44 +471,52 @@ Requires solution `beta`, plus:
 - [CI] All required charms at `candidate` (weakest-link rule).
 - [CI] If Authentik is in scope: it reaches `active/idle` on Kubernetes, and a user
   provisioned there can authenticate via SSSD or OpenSSH and submit a job *(target)*.
-- [CI] **Cross-charm upgrade / refresh** in the supported order *(target)*: refresh the
+- [CI] If SMTP is in scope: `smtp-integrator` is related to `slurmctld` (with
+  `slurmdbd` deployed and integrated first) and a job-status email is received
+  end to end, using a local capture server (e.g. `aiosmtpd`, as in the
+  `slurm-charms` mail tests) as a stand-in for the external mail server.
+  Validation against a real external mail server is manual (see UHPC006).
+- [CI] Cross-charm upgrade / refresh in the supported order *(target)*: refresh the
   solution from the previous solution release to the candidate, one component at a time,
   asserting the cluster stays functional (jobs continue to schedule) throughout, then
-  verify a **rollback** path.
-- [CI] **Interface compatibility matrix**: each relation interface version offered by a
+  verify a rollback path.
+- [CI] Interface compatibility matrix: each relation interface version offered by a
   candidate charm is accepted by the partner charm's candidate revision (no silent
   break across the set).
-- [CI] **Integrated observability**: Integrations with COS produce metrics, alert
-  rules, and dashboards and a Loki receives cluster logs all at appropriate intervals with validation testing of alerts.
-- [CI] **Operational at solution scale** *(target, via `charmed-hpc-benchmarks`)*:
+- [CI] Integrated observability: COS integrations produce metrics, alert rules,
+  and dashboards at appropriate intervals, Loki receives cluster logs, and
+  validation testing exercises the alerts.
+- [CI/MAN] Operational at solution scale *(target, via `charmed-hpc-benchmarks`)*:
   - multi-node scale-out of `slurmd` and scale-in,
-  - `slurmctld` **HA failover under load**: with steady multi-node job submission,
+  - `slurmctld` HA failover under load: with steady multi-node job submission,
     failover preserves in-flight and queued jobs (the B.3.2 job-survival check
     repeated at scale),
-  - cluster **sustained-load reliability run >= 24h** with steady job submission
-    and no leaks/flaps *(depending on resource availability)*,
+  - cluster sustained-load reliability run >= 24h (proposed default) with steady
+    job submission and no leaks/flaps *(may be waived for a given promotion only by
+    the solution/release owner, with the waiver recorded, e.g. when resources are
+    unavailable)*,
   - performance baseline (e.g. scheduling throughput, job turnaround) within budget.
 - [MAN] Solution documentation complete (deploy, integrate, operate, upgrade).
 - [MAN] Solution release notes drafted, listing the component version matrix.
 - [MAN] Security review of the composed set: sign off the cross-charm findings from
   the `beta` check and confirm no critical/high issues in the assembled deployment.
+- [MAN] Promotion approval recorded by the solution/release owner and the
+  maintainers of every required component (see B.1.1).
 
 #### B.3.4 Solution `stable`
 
 Requires solution `candidate`, plus:
 
-- [MAN] All required charms at `stable` (weakest-link rule).
-- [MAN] **Sustained-load reliability run on solution `candidate`:** >= **7 days**,
+- [CI] All required charms at `stable` (weakest-link rule).
+- [MAN] Sustained-load reliability run on solution `candidate`: >= 7 days,
   zero regressions, no new critical/high defects (proposed default).
-- [CI] Upgrade from the **current solution `stable`** to the new release verified end to
-  end (data + accounting DB + config preserved; jobs unaffected) *(target)*.
 - [CI/MAN] The frozen component version matrix is reproducible and each revision matches
   what passed the sustained-load reliability run on `candidate`.
 - [MAN] Final security sign-off for the composed deployment (no unresolved
   critical/high across the assembled set).
 - [MAN] Solution documentation and release notes published (including the version
   matrix and a supported upgrade path from the previous solution `stable`).
-- [MAN] Approval recorded by the solution/release owner **and** each component
+- [MAN] Approval recorded by the solution/release owner and each component
   maintainer.
 - [MAN] Documented rollback plan for the whole solution.
 
@@ -486,18 +528,20 @@ cross-charm gates only; single-charm gates are inherited per the weakest-link ru
 
 | Gate class                                | edge | beta | candidate | stable |
 |-------------------------------------------|:----:|:----:|:---------:|:------:|
-| All required charms at target channel     | CI   | CI   | CI        | MAN    |
+| All required charms at target channel     | CI   | CI   | CI        | CI     |
 | Full-stack deploy + relations settle      | CI   | CI   | CI        | CI     |
 | End-to-end job + shared services (FS/SSSD/SSH) | - | CI  | CI        | CI     |
 | Cross-charm reliability / HA (job survives failover) | - | CI | CI      | CI     |
-| Functional journeys                       | -    | CI   | CI        | CI     |
-| Cross-charm upgrade / rollback            | -    | -    | CI        | CI     |
+| Acceptance journeys                       | -    | CI   | CI        | CI     |
+| Cross-charm upgrade / rollback            | -    | -    | CI        | -      |
 | Interface-compatibility matrix            | -    | -    | CI        | CI     |
 | Integrated observability (COS)            | -    | -    | CI        | CI     |
 | External IdP (Authentik), if in scope     | -    | -    | CI        | CI     |
+| External mail (SMTP), if in scope         | -    | -    | CI        | CI     |
 | Performance (scale) / reliability (sustained load) | - | - | CI+MAN | MAN |
 | Composed-set security                     | -    | CI   | CI+MAN    | CI+MAN |
-| Solution docs / release notes             | -    | MAN  | MAN       | MAN    |
+| Solution docs                             | -    | MAN  | MAN       | MAN    |
+| Solution release notes                    | -    | -    | MAN       | MAN    |
 | Frozen version matrix        | -    | -    | -         | CI+MAN |
 | Final promotion approval                  | auto | MAN  | MAN       | MAN    |
 
@@ -511,7 +555,7 @@ require the maintainers of every required component (see B.1.1).
 |---------------|-------------|--------------------------------|
 | Scale         | performance | Validated `slurmd` scale-out and scale-in at the target node count for the release |
 | HA / failover | reliability | `slurmctld` leader failover with in-flight/queued jobs preserved |
-| Sustained load | reliability | >= 24h at candidate with continuous job submission; no leaks, restarts, or status flaps |
+| Sustained load | reliability | Extended sustained-load run at `candidate` with continuous job submission, plus a longer bake before `stable` (durations are proposed defaults); no leaks, restarts, or status flaps |
 | Performance   | performance | Baseline captured via `charmed-hpc-benchmarks`; regression budget agreed by maintainers |
 | Observability | solution    | Metrics, alerts, dashboards, and logs verified through COS |
 | Security      | security    | No unresolved critical/high across any constituent artifact or dependency |
