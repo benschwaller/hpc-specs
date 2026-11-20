@@ -143,8 +143,14 @@ Acceptance tests should be written in BDD style for clarity and maintainability.
 
 ### A.4 Per-channel promotion gates
 
-Legend: **[CI]** enforced automatically in CI; **[MAN]** manual sign-off; **[CI/MAN]**
-CI-produced evidence that a human reviews. *(target)* = not yet implemented in-repo.
+Legend:
+
+| Marker      | Meaning                                   |
+|-------------|-------------------------------------------|
+| **[CI]**    | Enforced automatically in CI              |
+| **[MAN]**   | Manual sign-off                           |
+| **[CI/MAN]**| CI-produced evidence that a human reviews |
+| *(target)*  | Not yet implemented in-repo               |
 
 #### A.4.1 Promote to `edge`
 
@@ -431,8 +437,14 @@ independently above `edge`; record each charm's revision individually.
 
 ### B.3 Cross-charm gates per channel
 
-Legend: **[CI]** automated; **[MAN]** manual; **[CI/MAN]** CI evidence, human review.
-*(target)* = capability to be built (e.g. functional suite, full upgrade matrix).
+Legend:
+
+| Marker      | Meaning                                                            |
+|-------------|--------------------------------------------------------------------|
+| **[CI]**    | Automated                                                          |
+| **[MAN]**   | Manual                                                             |
+| **[CI/MAN]**| CI evidence, human review                                          |
+| *(target)*  | Capability to be built (e.g. acceptance suite, full upgrade matrix) |
 
 #### B.3.1 Product `edge`
 
